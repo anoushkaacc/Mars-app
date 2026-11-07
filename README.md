@@ -43,3 +43,5 @@ streamlit run app.py
 The sidebar contains the model selection, overlay opacity, seconds per image and Start/Stop control. While running, the app advances through the test images and refreshes the displayed overlays automatically. The display is frozen when stopped.
 
 Validation mIoU is shown only when a checkpoint contains a `best_miou`, `val_miou` or `miou` metadata value. This is a checkpoint-recorded validation score, not a test-set score. Test-set IoU cannot be calculated from unlabelled images without ground truth.
+
+

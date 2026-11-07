@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import time
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,12 @@ from PIL import Image
 from config import (
     APP_DIR,
     CHECKPOINT_DIR,
+    FIVE_CLASS_NAMES,
     FIVE_CLASS_PALETTE,
     IMAGENET_MEAN,
     IMAGENET_STD,
     TEST_IMAGE_DIR,
+    TWELVE_CLASS_NAMES,
     TWELVE_CLASS_PALETTE,
 )
 from models import build_model, mark_quantizers_initialized
@@ -46,10 +49,7 @@ st.markdown(
         --paper: #ffffff;
         --canvas: #f7f8fc;
       }
-
-      html, body, [class*="css"], .stApp {
-        color: var(--ink) !important;
-      }
+      html, body, [class*="css"], .stApp { color: var(--ink) !important; }
       .stApp { background: var(--canvas); }
       [data-testid="stHeader"] { background: rgba(247,248,252,.96); }
       [data-testid="stSidebar"] {
@@ -58,7 +58,7 @@ st.markdown(
       }
       [data-testid="stSidebar"] * { color: var(--ink); }
       .block-container {
-        max-width: 2200px;
+        max-width: 2400px;
         padding-top: 1.05rem;
         padding-bottom: .8rem;
       }
@@ -74,7 +74,7 @@ st.markdown(
       [data-testid="stMarkdownContainer"] p { color: var(--ink); }
       [data-testid="stImage"] img {
         width: 100%;
-        max-height: 69vh;
+        max-height: 65vh;
         object-fit: contain;
         border-radius: 8px;
         background: #f0f2f7;
@@ -87,7 +87,9 @@ st.markdown(
         background: var(--blue-soft);
         border: 1px solid #d8e1ff;
       }
-      div[data-testid="stMultiSelect"] [data-baseweb="tag"] * { color: #2448bd !important; }
+      div[data-testid="stMultiSelect"] [data-baseweb="tag"] * {
+        color: #2448bd !important;
+      }
       div[data-testid="stSlider"] [data-baseweb="slider"] div[role="slider"] {
         background: var(--blue);
         border-color: var(--blue);
@@ -114,29 +116,24 @@ st.markdown(
         margin-bottom: .8rem;
       }
       .subline { color: var(--muted); font-size: .82rem; margin-top: .1rem; }
-      .live-pill {
+      .live-pill, .stopped-pill {
         display: inline-block;
         border-radius: 999px;
         padding: .28rem .62rem;
         font-size: .70rem;
         font-weight: 750;
         letter-spacing: .06em;
+        white-space: nowrap;
+      }
+      .live-pill {
         color: #2448bd;
         background: var(--blue-soft);
         border: 1px solid #d8e1ff;
-        white-space: nowrap;
       }
       .stopped-pill {
-        display: inline-block;
-        border-radius: 999px;
-        padding: .28rem .62rem;
-        font-size: .70rem;
-        font-weight: 750;
-        letter-spacing: .06em;
         color: #8c4564;
         background: var(--pink-soft);
         border: 1px solid #f0d5e1;
-        white-space: nowrap;
       }
       .model-title {
         color: var(--ink);
@@ -146,22 +143,48 @@ st.markdown(
         margin: 0 0 .45rem 0;
         min-height: 1.25rem;
       }
-      .model-score {
-        color: #2448bd;
-        font-size: .76rem;
-        font-weight: 650;
-        margin-top: .35rem;
-      }
-      .model-no-score {
-        color: var(--muted);
-        font-size: .72rem;
-        margin-top: .35rem;
-      }
       .image-line {
         color: var(--muted);
         font-size: .78rem;
         margin: .15rem 0 .75rem 0;
       }
+      .metric-line {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .35rem .65rem;
+        color: #2448bd;
+        font-size: .76rem;
+        font-weight: 650;
+        margin: .42rem 0 .45rem 0;
+      }
+      .class-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .34rem .55rem;
+        margin-top: .35rem;
+        padding: .48rem;
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .class-item {
+        display: inline-flex;
+        align-items: center;
+        gap: .28rem;
+        color: #303746;
+        font-size: .70rem;
+        line-height: 1.2;
+        white-space: nowrap;
+      }
+      .class-swatch {
+        display: inline-block;
+        width: 11px;
+        height: 11px;
+        min-width: 11px;
+        border: 1px solid rgba(20, 25, 35, .22);
+        border-radius: 2px;
+      }
+      .class-percent { color: var(--muted); font-variant-numeric: tabular-nums; }
       .sidebar-note {
         color: var(--muted);
         font-size: .75rem;
@@ -189,7 +212,7 @@ MODEL_SPECS: dict[str, dict[str, Any]] = {
         "imagenet_normalize": False,
     },
     "unet_cbam": {
-        "title": "U-Net + CBAM",
+        "title": "MarTA-Net (Published IEEE IOT)",
         "classes": 5,
         "checkpoint_names": ("unet_cbam.pth",),
         "input_size": 256,
@@ -222,7 +245,7 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 
 
 def resolve_checkpoint(names: tuple[str, ...]) -> Path | None:
-    """Resolve a checkpoint from the configured folder, then project root."""
+    """Resolve a checkpoint from checkpoints/, then the project root."""
     for name in names:
         for candidate in (CHECKPOINT_DIR / name, APP_DIR / name):
             if candidate.is_file():
@@ -243,12 +266,12 @@ def discover_test_images(image_dir: Path) -> list[Path]:
 
 
 def read_checkpoint(path: Path) -> tuple[dict[str, torch.Tensor], dict[str, Any]]:
-    """Read tensor-only checkpoint data without unrestricted pickle loading."""
+    """Load tensor-only checkpoint data without unrestricted pickle loading."""
     try:
         payload = torch.load(path, map_location="cpu", weights_only=True)
     except TypeError as exc:
         raise RuntimeError(
-            "Install PyTorch 2.6 or later; this app requires weights_only checkpoint loading."
+            "PyTorch 2.6 or later is required for safe checkpoint loading."
         ) from exc
 
     if not isinstance(payload, dict):
@@ -284,6 +307,7 @@ def read_checkpoint(path: Path) -> tuple[dict[str, torch.Tensor], dict[str, Any]
 
 @st.cache_resource(show_spinner=False)
 def load_model(model_key: str, checkpoint_path: str, device_name: str):
+    """Build and load one checkpoint once per Streamlit session resource cache."""
     device = torch.device(device_name)
     model = build_model(model_key)
     state_dict, metadata = read_checkpoint(Path(checkpoint_path))
@@ -299,7 +323,9 @@ def load_model(model_key: str, checkpoint_path: str, device_name: str):
     return model, metadata
 
 
-def prepare_tensor(image_path: Path, size: int, imagenet_normalize: bool) -> tuple[np.ndarray, torch.Tensor]:
+def prepare_tensor(
+    image_path: Path, size: int, imagenet_normalize: bool
+) -> tuple[np.ndarray, torch.Tensor]:
     with Image.open(image_path) as source:
         original_rgb = np.asarray(source.convert("RGB"), dtype=np.uint8).copy()
         resized = source.convert("RGB").resize(
@@ -341,39 +367,46 @@ def resize_labels(labels: np.ndarray, width: int, height: int) -> np.ndarray:
     )
 
 
-@st.cache_data(show_spinner=False, max_entries=256)
 def predict_one_image(
     model_key: str,
     checkpoint_path: str,
-    checkpoint_mtime_ns: int,
     image_path: str,
-    image_mtime_ns: int,
     device_name: str,
-) -> np.ndarray:
-    """Cache one image/model prediction; mtime keys refresh changed files."""
-    del checkpoint_mtime_ns, image_mtime_ns  # Used as cache-key version values.
+) -> tuple[np.ndarray, float]:
+    """Run one prediction and return its label map and model-forward latency (ms)."""
     spec = MODEL_SPECS[model_key]
     model, _ = load_model(model_key, checkpoint_path, device_name)
     original_rgb, tensor = prepare_tensor(
         Path(image_path), spec["input_size"], spec["imagenet_normalize"]
     )
+
     device = torch.device(device_name)
     model_dtype = next(model.parameters()).dtype
     tensor = tensor.to(device=device, dtype=model_dtype)
 
+    # Synchronize CUDA around the forward pass so the timer measures completed
+    # GPU work rather than only the asynchronous kernel-launch time.
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    start_time = time.perf_counter()
     with torch.inference_mode():
-        logits = extract_logits(model(tensor))
-        if logits.shape[-2:] != (spec["input_size"], spec["input_size"]):
-            logits = F.interpolate(
-                logits,
-                size=(spec["input_size"], spec["input_size"]),
-                mode="bilinear",
-                align_corners=False,
-            )
-        labels = torch.argmax(logits, dim=1)[0].detach().cpu().numpy().astype(np.uint8)
+        output = model(tensor)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    inference_ms = (time.perf_counter() - start_time) * 1000.0
+
+    logits = extract_logits(output)
+    if logits.shape[-2:] != (spec["input_size"], spec["input_size"]):
+        logits = F.interpolate(
+            logits,
+            size=(spec["input_size"], spec["input_size"]),
+            mode="bilinear",
+            align_corners=False,
+        )
+    labels = torch.argmax(logits, dim=1)[0].detach().cpu().numpy().astype(np.uint8)
 
     height, width = original_rgb.shape[:2]
-    return resize_labels(labels, width, height)
+    return resize_labels(labels, width, height), inference_ms
 
 
 def make_overlay(
@@ -386,7 +419,7 @@ def make_overlay(
     for class_id, rgb in enumerate(palette):
         mask_rgb[labels == class_id] = rgb
 
-    # Preserve the source image for class zero (background).
+    # Keep class 0 (background) visually transparent over the sample image.
     active = labels != 0
     overlay = image_rgb.astype(np.float32).copy()
     overlay[active] = (
@@ -396,21 +429,50 @@ def make_overlay(
     return np.clip(overlay, 0, 255).astype(np.uint8)
 
 
-def palette_for(model_key: str) -> list[tuple[int, int, int]]:
-    return FIVE_CLASS_PALETTE if MODEL_SPECS[model_key]["classes"] == 5 else TWELVE_CLASS_PALETTE
+def classes_for(model_key: str):
+    if MODEL_SPECS[model_key]["classes"] == 5:
+        return FIVE_CLASS_NAMES, FIVE_CLASS_PALETTE
+    return TWELVE_CLASS_NAMES, TWELVE_CLASS_PALETTE
+
+
+def class_legend_html(labels: np.ndarray, model_key: str) -> str:
+    """Create a compact color-key legend for classes predicted in this image."""
+    names, palette = classes_for(model_key)
+    class_ids, pixel_counts = np.unique(labels, return_counts=True)
+    total_pixels = max(int(labels.size), 1)
+    items: list[str] = []
+
+    for class_id, count in zip(class_ids.tolist(), pixel_counts.tolist()):
+        if class_id >= len(names):
+            continue
+        red, green, blue = palette[class_id]
+        name = html.escape(names[class_id])
+        percent = (count / total_pixels) * 100.0
+        items.append(
+            '<span class="class-item">'
+            f'<span class="class-swatch" style="background:rgb({red},{green},{blue})"></span>'
+            f'<span>{name}</span>'
+            f'<span class="class-percent">{percent:.1f}%</span>'
+            '</span>'
+        )
+
+    if not items:
+        return '<div class="class-legend"><span class="class-item">No classes detected</span></div>'
+    return '<div class="class-legend">' + "".join(items) + "</div>"
 
 
 def checkpoint_miou(metadata: dict[str, Any]) -> float | None:
-    """Return checkpoint-recorded validation mIoU, if included in metadata."""
+    """Return recorded validation mIoU when checkpoint metadata contains it."""
     for key in ("best_miou", "val_miou", "miou"):
         value = metadata.get(key)
         if isinstance(value, (int, float)) and np.isfinite(value):
-            return float(value)
+            value = float(value)
+            return value * 100.0 if 0.0 <= value <= 1.0 else value
     return None
 
 
 # -----------------------------------------------------------------------------
-# Sidebar: the only user-adjustable controls
+# Sidebar: compact user controls
 # -----------------------------------------------------------------------------
 all_keys = list(MODEL_SPECS)
 available_keys = [
@@ -470,7 +532,7 @@ if st.sidebar.button(
     st.rerun()
 
 st.sidebar.markdown(
-    f'<div class="sidebar-note">{len(image_paths)} test image(s) · {device_name.upper()}</div>',
+    f'<div class="sidebar-note">{len(image_paths)} image(s) · {device_name.upper()}</div>',
     unsafe_allow_html=True,
 )
 
@@ -483,7 +545,7 @@ refresh_seconds = float(seconds_per_image) if running else None
 
 st.markdown(
     '<div class="topline"><div><h1>Mars Terrain Inference</h1>'
-    '<div class="subline">Live prediction overlays</div></div>'
+    '<div class="subline">Sample image and live prediction overlays</div></div>'
     + (
         '<span class="live-pill">LIVE</span>'
         if running
@@ -494,7 +556,7 @@ st.markdown(
 )
 
 if not TEST_IMAGE_DIR.is_dir():
-    st.info("Test image folder not found. Check TEST_IMAGE_DIR in config.py.")
+    st.info(f"Test image folder not found: {TEST_IMAGE_DIR}")
 elif not image_paths:
     st.info("No supported test images were found in the configured folder.")
 elif not available_keys:
@@ -518,23 +580,28 @@ else:
         try:
             with Image.open(image_path) as source:
                 image_rgb = np.asarray(source.convert("RGB"), dtype=np.uint8).copy()
-        except Exception:
-            st.error("The current image could not be opened.")
+        except Exception as exc:
+            st.error(f"Could not open the current image ({type(exc).__name__}).")
             return
 
         st.markdown(
             f'<div class="image-line">Image {frame_index + 1} of {len(paths)}'
-            f' &nbsp;·&nbsp; {image_path.name}</div>',
+            f' &nbsp;·&nbsp; {html.escape(image_path.name)}</div>',
             unsafe_allow_html=True,
         )
 
-        columns = st.columns(len(selected_model_keys), gap="small")
-        for column, model_key in zip(columns, selected_model_keys):
+        # First panel is the original image; remaining panels are model overlays.
+        columns = st.columns(len(selected_model_keys) + 1, gap="small")
+        with columns[0]:
+            st.markdown('<div class="model-title">Sample image</div>', unsafe_allow_html=True)
+            st.image(image_rgb, use_container_width=True)
+
+        for column, model_key in zip(columns[1:], selected_model_keys):
             spec = MODEL_SPECS[model_key]
             checkpoint = resolve_checkpoint(spec["checkpoint_names"])
             with column:
                 st.markdown(
-                    f'<div class="model-title">{spec["title"]}</div>',
+                    f'<div class="model-title">{html.escape(spec["title"])}</div>',
                     unsafe_allow_html=True,
                 )
                 if checkpoint is None:
@@ -543,29 +610,36 @@ else:
 
                 try:
                     _, metadata = load_model(model_key, str(checkpoint), device_name)
-                    labels = predict_one_image(
+                    labels, inference_ms = predict_one_image(
                         model_key=model_key,
                         checkpoint_path=str(checkpoint),
-                        checkpoint_mtime_ns=checkpoint.stat().st_mtime_ns,
                         image_path=str(image_path),
-                        image_mtime_ns=image_path.stat().st_mtime_ns,
                         device_name=device_name,
                     )
                     overlay = make_overlay(
                         image_rgb,
                         labels,
-                        palette_for(model_key),
+                        classes_for(model_key)[1],
                         float(opacity),
                     )
                     st.image(overlay, use_container_width=True)
 
+                    metric_parts = [f"Inference · {inference_ms:.2f} ms"]
                     score = checkpoint_miou(metadata)
                     if score is not None:
-                        st.markdown(
-                            f'<div class="model-score">Validation mIoU · {score * 100:.2f}%</div>',
-                            unsafe_allow_html=True,
-                        )
-                except Exception:
-                    st.warning("Prediction unavailable for this model.")
+                        metric_parts.append(f"Validation mIoU · {score:.2f}%")
+                    metric_html = "".join(
+                        f'<span>{html.escape(part)}</span>' for part in metric_parts
+                    )
+                    st.markdown(
+                        f'<div class="metric-line">{metric_html}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        class_legend_html(labels, model_key),
+                        unsafe_allow_html=True,
+                    )
+                except Exception as exc:
+                    st.warning(f"Prediction unavailable ({type(exc).__name__}).")
 
     live_prediction_frame()

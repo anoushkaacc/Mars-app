@@ -1,10 +1,11 @@
-@echo off
-cd /d "%~dp0"
 
-if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" -m streamlit run app.py
-) else (
-    python -m streamlit run app.py
+@echo off
+cd /d D:\mars_app
+
+if exist .venv\Scripts\activate.bat (
+    call .venv\Scripts\activate.bat
 )
 
-if errorlevel 1 pause
+python -m streamlit run app.py
+
+pause
