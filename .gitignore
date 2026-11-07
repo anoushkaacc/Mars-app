@@ -1,0 +1,18 @@
+*.pth
+*.pt
+mars_app_outputs/
+__pycache__/
+.venv/
+checkpoints/
+# Model checkpoints
+checkpoints/
+*.pth
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
