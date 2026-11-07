@@ -1,6 +1,6 @@
 """Local paths, class labels, palettes and preprocessing settings."""
 from pathlib import Path
-
+HF_REPO_ID = "anoushkaacc/mars-segmentation-checkpoints"
 APP_DIR = Path(__file__).resolve().parent
 CHECKPOINT_DIR = APP_DIR / "checkpoints"
 
