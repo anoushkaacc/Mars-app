@@ -219,13 +219,7 @@ MODEL_SPECS: dict[str, dict[str, Any]] = {
         "input_size": 256,
         "imagenet_normalize": False,
     },
-    "cchnet_fp16": {
-        "title": "CCHNet · FP16",
-        "classes": 12,
-        "checkpoint_names": ("CCHNet_FP16.pth", "cchnet_fp16.pth"),
-        "input_size": 384,
-        "imagenet_normalize": True,
-    },
+    
     "cchnet_binary": {
         "title": "CCHNet · Binarized",
         "classes": 12,
