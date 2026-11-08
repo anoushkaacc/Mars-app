@@ -542,10 +542,10 @@ st.sidebar.markdown("## Display controls")
 selected_model_keys = st.sidebar.multiselect(
     "Models",
     options=available_keys,
-    default=default_models,
+    default=available_keys,
     format_func=lambda key: MODEL_SPECS[key]["title"],
     placeholder="Select models",
-    help="Start with one model on the free cloud tier. Select additional models if memory allows.",
+    help="All models are selected by default. Remove any models you do not want to compare.",
 )
 opacity = st.sidebar.slider(
     "Overlay opacity",
@@ -558,7 +558,7 @@ seconds_per_image = st.sidebar.number_input(
     "Seconds per image",
     min_value=1.0,
     max_value=60.0,
-    value=3.0,
+    value=10.0,
     step=1.0,
 )
 
