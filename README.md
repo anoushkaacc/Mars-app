@@ -32,13 +32,12 @@ images.
 
 ## Models
 
-  Model                                Status
+  Model                               | Status
   ------------------------------------ --------------
-  **MarTA-Net (Published IEEE IoT)**   Published
-  U-Net                                Baseline
-  CCHNet -- FP16                       Experimental
-  CCHNet -- Binarized                  Experimental
-  CCHNet -- 4-bit LSQ                  Experimental
+  **MarTA-Net (Published IEEE IoT)**  | Published
+  U-Net                               | Baseline
+  CCHNet -- Binarized                 | Experimental
+  CCHNet -- 4-bit LSQ                 | Experimental
 
 ## Featured Research: MarTA-Net
 
