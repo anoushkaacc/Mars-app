@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 import html
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -15,6 +13,8 @@ from PIL import Image
 from config import (
     APP_DIR,
     CHECKPOINT_DIR,
+    HF_REPO_ID,
+    HF_REPO_TYPE,
     FIVE_CLASS_NAMES,
     FIVE_CLASS_PALETTE,
     IMAGENET_MEAN,
@@ -24,18 +24,6 @@ from config import (
     TWELVE_CLASS_PALETTE,
 )
 from models import build_model, mark_quantizers_initialized
-
-
-# Public Hugging Face model repository containing the .pth files.
-# Change this one value if your repository has a different owner/name.
-DEFAULT_HF_REPO_ID = "anoushkaacc/mars-segmentation-checkpoints"
-HF_REPO_ID = os.environ.get("HF_REPO_ID", "").strip()
-try:
-    # Streamlit Community Cloud secrets can override the default repository ID.
-    HF_REPO_ID = str(st.secrets.get("HF_REPO_ID", HF_REPO_ID)).strip()
-except Exception:
-    pass
-HF_REPO_ID = HF_REPO_ID or DEFAULT_HF_REPO_ID
 
 
 # -----------------------------------------------------------------------------
@@ -257,60 +245,58 @@ MODEL_SPECS: dict[str, dict[str, Any]] = {
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 
 
-def find_local_checkpoint(names: tuple[str, ...]) -> Path | None:
-    """Return a locally available checkpoint, if one exists."""
-    for name in names:
-        for candidate in (CHECKPOINT_DIR / name, APP_DIR / name):
-            if candidate.is_file():
-                return candidate
-    return None
+@st.cache_data(show_spinner=False)
+def download_checkpoint_from_huggingface(filename: str) -> str:
+    """Download one checkpoint from the configured Hugging Face repository.
 
-
-def checkpoint_is_configured(names: tuple[str, ...]) -> bool:
-    """Whether a model has a local checkpoint or a configured HF repository."""
-    return find_local_checkpoint(names) is not None or bool(HF_REPO_ID)
-
-
-def get_checkpoint_path(names: tuple[str, ...]) -> str:
-    """Use a local checkpoint first; otherwise download it from Hugging Face.
-
-    huggingface_hub is imported lazily so local development can still run with
-    local .pth files even before huggingface_hub has been installed.
+    Hugging Face keeps a local cache, so a checkpoint is not downloaded again
+    when the same revision is already present on the Streamlit server.
     """
-    local_path = find_local_checkpoint(names)
-    if local_path is not None:
-        return str(local_path)
-
-    if not HF_REPO_ID:
-        raise FileNotFoundError(
-            "No local checkpoint was found and HF_REPO_ID is not configured."
-        )
-
     try:
         from huggingface_hub import hf_hub_download
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub is required to download model weights. "
-            "Add 'huggingface_hub' to requirements.txt and redeploy."
+            "huggingface_hub is required only when a checkpoint must be "
+            "downloaded from Hugging Face. Install it with "
+            "python -m pip install huggingface_hub."
         ) from exc
 
-    errors: list[str] = []
-    for filename in names:
-        try:
-            # The Hub client caches downloads, so subsequent reruns reuse the
-            # cached file rather than downloading the checkpoint again.
-            return hf_hub_download(
-                repo_id=HF_REPO_ID,
-                filename=filename,
-                repo_type="model",
-            )
-        except Exception as exc:
-            errors.append(f"{filename}: {type(exc).__name__}: {exc}")
+    return hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename=filename,
+        repo_type=HF_REPO_TYPE,
+    )
 
+
+def resolve_checkpoint(names: tuple[str, ...]) -> Path | None:
+    """Prefer a local checkpoint; otherwise fetch it from Hugging Face.
+
+    The Hugging Face repository supplied for this app is a Dataset repository,
+    so HF_REPO_TYPE is set to "dataset" in config.py.
+    """
+    # Local development: use checkpoint files already on this computer.
+    for name in names:
+        for candidate in (CHECKPOINT_DIR / name, APP_DIR / name):
+            if candidate.is_file():
+                return candidate
+
+    # Streamlit Cloud: retrieve a file from the public Hugging Face dataset.
+    if not HF_REPO_ID:
+        return None
+
+    download_errors: list[str] = []
+    for name in names:
+        try:
+            return Path(download_checkpoint_from_huggingface(name))
+        except Exception as exc:
+            download_errors.append(f"{name}: {type(exc).__name__}: {exc}")
+
+    details = " | ".join(download_errors)
     raise FileNotFoundError(
-        f"Could not find any of {', '.join(names)} in Hugging Face repository "
-        f"'{HF_REPO_ID}'. Check the repository ID, visibility and exact filenames. "
-        + " | ".join(errors)
+        f"Could not download any of these checkpoint files from "
+        f"{HF_REPO_TYPE} repository '{HF_REPO_ID}': {', '.join(names)}. "
+        f"Check that the files are uploaded at the repository root and that "
+        f"their names match exactly. Details: {details}"
     )
 
 
@@ -491,17 +477,9 @@ def make_overlay(
 
 
 def classes_for(model_key: str):
-    """Return class labels/palette, displaying class 0 as Unknown."""
     if MODEL_SPECS[model_key]["classes"] == 5:
-        names = list(FIVE_CLASS_NAMES)
-        palette = FIVE_CLASS_PALETTE
-    else:
-        names = list(TWELVE_CLASS_NAMES)
-        palette = TWELVE_CLASS_PALETTE
-
-    if names:
-        names[0] = "Unknown"
-    return names, palette
+        return FIVE_CLASS_NAMES, FIVE_CLASS_PALETTE
+    return TWELVE_CLASS_NAMES, TWELVE_CLASS_PALETTE
 
 
 def class_legend_html(labels: np.ndarray, model_key: str) -> str:
@@ -544,18 +522,36 @@ def checkpoint_miou(metadata: dict[str, Any]) -> float | None:
 # Sidebar: compact user controls
 # -----------------------------------------------------------------------------
 all_keys = list(MODEL_SPECS)
+
+def has_local_checkpoint(names: tuple[str, ...]) -> bool:
+    return any(
+        candidate.is_file()
+        for name in names
+        for candidate in (CHECKPOINT_DIR / name, APP_DIR / name)
+    )
+
+# Do not download all checkpoints just to build the sidebar. If the HF source
+# is configured, expose all model options and download only selected models.
 available_keys = [
     key for key in all_keys
-    if checkpoint_is_configured(MODEL_SPECS[key]["checkpoint_names"])
+    if has_local_checkpoint(MODEL_SPECS[key]["checkpoint_names"]) or HF_REPO_ID
 ]
+
+# Default to one model to reduce memory pressure on Streamlit Community Cloud.
+default_model = (
+    "unet_cbam" if "unet_cbam" in available_keys
+    else (available_keys[0] if available_keys else None)
+)
+default_models = [default_model] if default_model else []
 
 st.sidebar.markdown("## Display controls")
 selected_model_keys = st.sidebar.multiselect(
     "Models",
     options=available_keys,
-    default=available_keys,
+    default=default_models,
     format_func=lambda key: MODEL_SPECS[key]["title"],
     placeholder="Select models",
+    help="Start with one model on the free cloud tier. Select additional models if memory allows.",
 )
 opacity = st.sidebar.slider(
     "Overlay opacity",
@@ -572,15 +568,7 @@ seconds_per_image = st.sidebar.number_input(
     step=1.0,
 )
 
-# On a developer machine, keep using the configured validation/test folder.
-# On Streamlit Cloud, the Windows/local path will not exist; use a small folder
-# committed with the repository instead.
-if TEST_IMAGE_DIR.is_dir():
-    ACTIVE_TEST_IMAGE_DIR = TEST_IMAGE_DIR
-else:
-    ACTIVE_TEST_IMAGE_DIR = APP_DIR / "sample_images"
-
-image_paths = discover_test_images(ACTIVE_TEST_IMAGE_DIR)
+image_paths = discover_test_images(TEST_IMAGE_DIR)
 device_name = "cuda" if torch.cuda.is_available() else "cpu"
 
 if "mars_running" not in st.session_state:
@@ -609,7 +597,8 @@ if st.sidebar.button(
     st.rerun()
 
 st.sidebar.markdown(
-    f'<div class="sidebar-note">{len(image_paths)} image(s) · {device_name.upper()} · weights: Hugging Face/local</div>',
+    f'<div class="sidebar-note">{len(image_paths)} image(s) · {device_name.upper()}<br>'
+    f'Checkpoint source: Hugging Face ({HF_REPO_TYPE})</div>',
     unsafe_allow_html=True,
 )
 
@@ -632,18 +621,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if not ACTIVE_TEST_IMAGE_DIR.is_dir():
-    st.info(
-        "No image directory was found. Add a 'sample_images' folder containing "
-        "at least one JPG or PNG image to your GitHub repository."
-    )
+if not TEST_IMAGE_DIR.is_dir():
+    st.info(f"Test image folder not found: {TEST_IMAGE_DIR}")
 elif not image_paths:
     st.info("No supported test images were found in the configured folder.")
 elif not available_keys:
-    st.info(
-        "No models are configured. Check the Hugging Face repository ID at the "
-        "top of app.py, or place checkpoint files in the local checkpoints folder."
-    )
+    st.info("No local checkpoints were found and no Hugging Face repository is configured.")
 elif not selected_model_keys:
     st.info("Select at least one model in the sidebar.")
 else:
@@ -687,12 +670,18 @@ else:
                     unsafe_allow_html=True,
                 )
                 try:
-                    # Resolve/download only selected models, not every model at startup.
-                    checkpoint = get_checkpoint_path(spec["checkpoint_names"])
-                    _, metadata = load_model(model_key, checkpoint, device_name)
+                    # This is the first point at which a remote checkpoint is
+                    # downloaded. Only selected models are downloaded.
+                    with st.spinner("Loading checkpoint…"):
+                        checkpoint = resolve_checkpoint(spec["checkpoint_names"])
+                    if checkpoint is None:
+                        st.warning("Checkpoint is not configured or was not found.")
+                        continue
+
+                    _, metadata = load_model(model_key, str(checkpoint), device_name)
                     labels, inference_ms = predict_one_image(
                         model_key=model_key,
-                        checkpoint_path=checkpoint,
+                        checkpoint_path=str(checkpoint),
                         image_path=str(image_path),
                         device_name=device_name,
                     )
@@ -707,7 +696,7 @@ else:
                     metric_parts = [f"Inference · {inference_ms:.2f} ms"]
                     score = checkpoint_miou(metadata)
                     if score is not None:
-                        metric_parts.append(f"Validation mIoU · {score:.2f}%")
+                        metric_parts.append(f"Checkpoint validation mIoU · {score:.2f}%")
                     metric_html = "".join(
                         f'<span>{html.escape(part)}</span>' for part in metric_parts
                     )
@@ -720,9 +709,8 @@ else:
                         unsafe_allow_html=True,
                     )
                 except Exception as exc:
-                    st.warning(
-                        f"Prediction unavailable for {spec['title']}: "
-                        f"{type(exc).__name__}: {exc}"
+                    st.error(
+                        f"{type(exc).__name__}: {exc}",
                     )
 
     live_prediction_frame()
