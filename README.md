@@ -1,47 +1,65 @@
-# Mars Terrain Live Inference Dashboard
+# Martian Terrain Segmentation Dashboard
 
-A one-page, desktop-first Streamlit viewer for continuously cycling through unlabelled Mars test images and displaying selected model prediction overlays.
+**VG-NET Lab, IISER Thiruvananthapuram**\
+**Research support: Indian Space Research Organisation (ISRO)**
 
-## Files
+An interactive Streamlit application for visualizing and comparing
+deep-learning models for multi-class semantic segmentation of Martian
+surface imagery.
 
-- `app.py` — compact live dashboard, prediction caching, checkpoint loading and overlay rendering.
-- `models.py` — the five model architectures used by the supported checkpoints.
-- `config.py` — checkpoint and test-image paths, class palettes and normalization.
-- `requirements.txt` — Python dependencies. Streamlit 1.37+ is required for `st.fragment` timed refresh.
-- `run_app.bat` — Windows launcher.
+## Live Demo
 
-## Folder layout
+**[Explore the Mars Segmentation
+Dashboard](https://mars-app-inference-only.streamlit.app/)**
 
-```text
-D:\mars_app\
-  app.py
-  models.py
-  config.py
-  requirements.txt
-  run_app.bat
-  checkpoints\
-    unet.pth
-    unet_cbam.pth
-    CCHNet_FP16.pth
-    binary_y_net_mars.pth
-    adaptive_y_net_mars.pth
-```
+Try the application to compare model predictions on Martian terrain
+images.
 
-Put test images in the folder configured by `TEST_IMAGE_DIR` in `config.py` (default: `D:\Internship\test images`). Ground-truth masks are not required.
+## What does the application do?
 
-## Install and run
+-   **Model comparison:** Visualize predictions from multiple
+    segmentation architectures.
+-   **Prediction overlays:** Compare predicted terrain masks against the
+    original sample image.
+-   **Class-wise analysis:** Identify terrain classes present in each
+    prediction, with color-coded labels and pixel percentages.
+-   **Inference timing:** View the time taken by each model to generate
+    a prediction.
+-   **Model evaluation:** Display available validation mIoU information
+    when checkpoint metadata is available.
+-   **Interactive exploration:** Select models, adjust overlay opacity,
+    and cycle through sample images.
 
-```powershell
-cd D:\mars_app
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-streamlit run app.py
-```
+## Models
 
-The sidebar contains the model selection, overlay opacity, seconds per image and Start/Stop control. While running, the app advances through the test images and refreshes the displayed overlays automatically. The display is frozen when stopped.
+  Model                                Status
+  ------------------------------------ --------------
+  **MarTA-Net (Published IEEE IoT)**   Published
+  U-Net                                Baseline
+  CCHNet -- FP16                       Experimental
+  CCHNet -- Binarized                  Experimental
+  CCHNet -- 4-bit LSQ                  Experimental
 
-Validation mIoU is shown only when a checkpoint contains a `best_miou`, `val_miou` or `miou` metadata value. This is a checkpoint-recorded validation score, not a test-set score. Test-set IoU cannot be calculated from unlabelled images without ground truth.
+## Featured Research: MarTA-Net
 
+MarTA-Net is a terrain-aware U-Net enhanced with the **Convolutional
+Block Attention Module (CBAM)** for multi-class Martian surface
+segmentation. The published work investigates attention-based feature
+refinement and a lightweight model direction for more efficient
+inference.
 
+**Interested in the methodology and experimental results?**
+
+Read the paper:
+
+-   **Publication:** [MarTA-Net: A Terrain-Aware U-Net Enhanced With
+    Convolutional Block Attention Modules for Martian Surface
+    Segmentation](https://doi.org/10.1109/JIOT.2026.3726564)
+-   **Journal:** *IEEE Internet of Things Journal*, 2026
+-   **Dataset:** [MarTA-Net Dataset on Hugging
+    Face](https://huggingface.co/datasets/Anoushkaacc/MarTA-Net)
+
+## Acknowledgement
+
+This research is conducted at **VG-NET Lab, IISER Thiruvananthapuram**,
+with support from the **Indian Space Research Organisation (ISRO)**.
