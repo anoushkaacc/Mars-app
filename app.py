@@ -31,7 +31,7 @@ from models import build_model, mark_quantizers_initialized
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Mars Terrain | Live Inference",
-    page_icon="🪐",
+    page_icon="🌕",
     layout="wide",
     initial_sidebar_state="expanded",
 )
